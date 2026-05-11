@@ -1,0 +1,3 @@
+# Generate and post yesterday's newsletter every morning at 07:30 local time.
+# Replace /path/to/Newsletter with this plugin directory on your bot host.
+30 7 * * * /path/to/Newsletter/scripts/run_newsletter.sh >> /path/to/Newsletter/data/state/cron.log 2>&1

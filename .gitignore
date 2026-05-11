@@ -1,0 +1,10 @@
+# Runtime/state artifacts
+data/
+
+# Local secrets/environment
+config/newsletter.env
+
+# Python/cache/editor noise
+__pycache__/
+*.pyc
+.DS_Store
