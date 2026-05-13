@@ -85,14 +85,21 @@ Use these sections unless the user asks otherwise:
 Default: do not include a `Numbers` section unless explicitly requested.
 
 ## Best Arguments Rules
-- Include each materially distinct argument that actually took place in the day's log. No fixed cap.
+- Include only the strongest real arguments from the day's log, usually 3-6 entries. Do not try to catalog every topic people discussed.
 - Treat repeated flare-ups about the same core topic as one argument, not several.
-- An "argument" means a real back-and-forth disagreement, not a single snarky comment or passing gripe.
+- An "argument" means a real back-and-forth disagreement where at least two human participants make incompatible claims.
+- Before including an entry, verify that the log contains:
+  - one direct claim from one side
+  - one direct counterclaim from another side
+  - enough substance to judge who had the better case
+- Do not include idle chat, taste preferences, rankings, recommendations, jokes, riffs, bot Q&A, or people merely discussing the same subject unless they actually disagree about a claim.
+- Do not count bot output as a participant or as evidence for a side. If humans argue about the bot's answer, judge only the humans' claims.
+- Only list a participant on a side if they directly advanced that side's argument. Do not infer coalitions from proximity, agreement vibes, or people chatting near the topic.
 - For each entry, include:
-  - the specific topic
-  - the participants
+  - the specific disputed claim
+  - the participants or sides
   - who won
-  - optionally one short quote if it sharpens the entry
+  - optionally one short quote if it proves the disagreement
 - Keep each entry to 1-2 lines. No play-by-play.
 - "Won" does not require a clean concession. Call it for the side with the better evidence, the last coherent unanswered point, or the least embarrassing position.
 - If no side clearly won, use these tiebreakers: factual correctness, last coherent point before the topic died, visible channel support, an unanswered challenge, then least annoying presentation.
@@ -101,7 +108,7 @@ Default: do not include a `Numbers` section unless explicitly requested.
 - Do not use `nobody` as an outcome in this section.
 - Do not invent winners to be polite, but do make a judgment call instead of hiding behind uncertainty.
 - Do not editorialize with adverbs like "brilliantly" or "soundly."
-- If there were no real arguments, write one line saying so and do not force the section into a list.
+- If there were fewer than three real arguments, include fewer than three. If there were no real arguments, write one line saying so and do not force the section into a list.
 
 ## Quote Selection Rules
 - Pull 8-12 quotes total.
