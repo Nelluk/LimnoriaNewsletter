@@ -56,6 +56,7 @@ fi
 
 : "${CODEX_BIN:=codex}"
 : "${CODEX_WORKDIR:=$PROJECT_ROOT}"
+: "${PASTERS_IO_ENDPOINT:=https://pasters.io/}"
 : "${PASTE_RS_ENDPOINT:=${PASTE_ENDPOINT:-https://paste.rs}}"
 : "${DPASTE_ENDPOINT:=https://dpaste.com/api/v2/}"
 : "${PASTE_UPLOAD_TIMEOUT:=20}"
@@ -63,8 +64,8 @@ fi
 : "${PASTE_UPLOAD_RETRIES:=3}"
 : "${DPASTE_SYNTAX:=md}"
 : "${DPASTE_PREVIEW_SUFFIX:=-preview}"
-: "${CODEX_MODEL:=gpt-5.5}"
-: "${CODEX_MODEL_REASONING_EFFORT:=medium}"
+: "${CODEX_MODEL:=gpt-5.6-terra}"
+: "${CODEX_MODEL_REASONING_EFFORT:=high}"
 : "${STATE_DIR:=$PROJECT_ROOT/data/state}"
 : "${NEWSLETTER_RUNTIME_DIR:=$PROJECT_ROOT/data}"
 : "${CODEX_HOME:=${NEWSLETTER_RUNTIME_DIR}/codex_home}"
@@ -209,13 +210,54 @@ make_tmpdir() {
   mktemp -d
 }
 
-normalize_paste_rs_url() {
+normalize_paste_url() {
   local url="$1"
-  if [[ "$url" =~ ^https?://paste\.rs/[^[:space:]]+$ ]] && [[ ! "$url" =~ \.md$ ]]; then
+  if [[ "$url" =~ ^https?://(pasters\.io|paste\.rs)/[^[:space:]]+$ ]] && [[ ! "$url" =~ \.md$ ]]; then
     printf '%s.md\n' "$url"
   else
     printf '%s\n' "$url"
   fi
+}
+
+upload_pasters_io() {
+  local file="$1"
+  local attempt=1
+  local url=""
+  local response_file=""
+  local http_code=""
+
+  while [[ "$attempt" -le "$PASTE_UPLOAD_RETRIES" ]]; do
+    response_file="$(mktemp "$tmpdir/pasters_io_response.XXXXXX")"
+    http_code="$(curl -sS \
+      --connect-timeout "$PASTE_CONNECT_TIMEOUT" \
+      --max-time "$PASTE_UPLOAD_TIMEOUT" \
+      -o "$response_file" \
+      -w '%{http_code}' \
+      --data-binary @"$file" \
+      "$PASTERS_IO_ENDPOINT" || true)"
+
+    if [[ "$http_code" == "201" ]]; then
+      url="$(tr -d '\r\n' < "$response_file")"
+      rm -f "$response_file"
+      if [[ "$url" =~ ^https?:// ]]; then
+        normalize_paste_url "$url"
+        return 0
+      fi
+      echo "pasters.io upload attempt ${attempt}/${PASTE_UPLOAD_RETRIES} returned an empty or invalid URL" >&2
+    elif [[ "$http_code" == "206" ]]; then
+      echo "pasters.io upload rejected: response was truncated (HTTP 206)" >&2
+      rm -f "$response_file"
+      return 1
+    else
+      echo "pasters.io upload attempt ${attempt}/${PASTE_UPLOAD_RETRIES} failed (HTTP ${http_code:-unknown})" >&2
+    fi
+
+    rm -f "$response_file"
+    sleep $((attempt * 2))
+    attempt=$((attempt + 1))
+  done
+
+  return 1
 }
 
 upload_paste_rs() {
@@ -231,7 +273,7 @@ upload_paste_rs() {
       "$PASTE_RS_ENDPOINT")"; then
       url="$(printf '%s' "$url" | tr -d '\r\n')"
       if [[ -n "$url" ]]; then
-        normalize_paste_rs_url "$url"
+        normalize_paste_url "$url"
         return 0
       fi
     fi
@@ -831,8 +873,13 @@ if [[ "$NO_UPLOAD" -eq 1 ]]; then
   exit 0
 fi
 
+pasters_io_url=""
 paste_rs_url=""
 dpaste_url=""
+
+if [[ -n "$PASTERS_IO_ENDPOINT" ]]; then
+  pasters_io_url="$(upload_pasters_io "$OUTPUT_FILE" || true)"
+fi
 
 if [[ -n "$PASTE_RS_ENDPOINT" ]]; then
   paste_rs_url="$(upload_paste_rs "$OUTPUT_FILE" || true)"
@@ -842,18 +889,17 @@ if [[ -n "$DPASTE_ENDPOINT" ]]; then
   dpaste_url="$(upload_dpaste_preview "$OUTPUT_FILE" || true)"
 fi
 
-if [[ -n "$paste_rs_url" && -n "$dpaste_url" ]]; then
-  echo "${paste_rs_url} (${dpaste_url})"
-  exit 0
-fi
+urls=()
+[[ -n "$pasters_io_url" ]] && urls+=("$pasters_io_url")
+[[ -n "$paste_rs_url" ]] && urls+=("$paste_rs_url")
+[[ -n "$dpaste_url" ]] && urls+=("$dpaste_url")
 
-if [[ -n "$paste_rs_url" ]]; then
-  echo "$paste_rs_url"
-  exit 0
-fi
-
-if [[ -n "$dpaste_url" ]]; then
-  echo "$dpaste_url"
+if [[ "${#urls[@]}" -gt 0 ]]; then
+  output="${urls[0]}"
+  for ((i = 1; i < ${#urls[@]}; i++)); do
+    output+=" (${urls[$i]})"
+  done
+  echo "$output"
   exit 0
 fi
 

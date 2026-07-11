@@ -12,7 +12,9 @@ from supybot.commands import getopts, optional, wrap
 
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-PASTE_URL_RE = re.compile(r"(https?://paste\.rs/[^\s]+)")
+PASTE_URL_RE = re.compile(
+    r"(https?://(?:pasters\.io|paste\.rs|dpaste\.com)/[^\s)]+)"
+)
 DATE_IN_PATH_RE = re.compile(r"newsletter-(\d{4}-\d{2}-\d{2})\.md$")
 START_ANNOUNCE_DELAY_SECONDS = 1.0
 
@@ -40,7 +42,10 @@ class Newsletter(callbacks.Plugin):
         url = (url or "").strip()
         if not url:
             return ""
-        if re.match(r"^https?://paste\.rs/[^\s]+$", url) and not url.endswith(".md"):
+        if (
+            re.match(r"^https?://(?:pasters\.io|paste\.rs)/[^\s]+$", url)
+            and not url.endswith(".md")
+        ):
             return f"{url}.md"
         return url
 

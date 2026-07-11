@@ -35,7 +35,7 @@ PY
 
 normalize_url() {
   local url="$1"
-  if [[ "$url" =~ ^https?://paste\.rs/[^[:space:]]+$ ]] && [[ ! "$url" =~ \.md$ ]]; then
+  if [[ "$url" =~ ^https?://(pasters\.io|paste\.rs)/[^[:space:]]+$ ]] && [[ ! "$url" =~ \.md$ ]]; then
     printf '%s.md\n' "$url"
   else
     printf '%s\n' "$url"
@@ -142,6 +142,43 @@ upload_paste_rs() {
   return 1
 }
 
+upload_pasters_io() {
+  local file="$1"
+  local attempt=1
+  local url=""
+  local response_file=""
+  local http_code=""
+
+  while [[ "$attempt" -le "$PASTE_UPLOAD_RETRIES" ]]; do
+    response_file="$(mktemp "$TMP_WORKDIR/pasters_io_response.XXXXXX")"
+    http_code="$(curl -sS \
+      --connect-timeout "$PASTE_CONNECT_TIMEOUT" \
+      --max-time "$PASTE_UPLOAD_TIMEOUT" \
+      -o "$response_file" \
+      -w '%{http_code}' \
+      --data-binary @"$file" \
+      "$PASTERS_IO_ENDPOINT" || true)"
+
+    if [[ "$http_code" == "201" ]]; then
+      url="$(tr -d '\r\n' < "$response_file")"
+      rm -f "$response_file"
+      if [[ "$url" =~ ^https?:// ]]; then
+        normalize_url "$url"
+        return 0
+      fi
+    elif [[ "$http_code" == "206" ]]; then
+      rm -f "$response_file"
+      return 1
+    fi
+
+    rm -f "$response_file"
+    attempt=$((attempt + 1))
+    sleep $((attempt * 2))
+  done
+
+  return 1
+}
+
 upload_dpaste_preview() {
   local file="$1"
   local attempt=1
@@ -183,10 +220,17 @@ upload_dpaste_preview() {
 
 republish_existing_markdown() {
   local md_file="$1"
+  local pasters_io_url=""
   local paste_rs_url=""
   local dpaste_url=""
+  local output=""
+  local -a urls=()
 
   [[ -f "$md_file" ]] || return 1
+
+  if [[ -n "$PASTERS_IO_ENDPOINT" ]]; then
+    pasters_io_url="$(upload_pasters_io "$md_file" || true)"
+  fi
 
   if [[ -n "$PASTE_RS_ENDPOINT" ]]; then
     paste_rs_url="$(upload_paste_rs "$md_file" || true)"
@@ -196,16 +240,16 @@ republish_existing_markdown() {
     dpaste_url="$(upload_dpaste_preview "$md_file" || true)"
   fi
 
-  if [[ -n "$paste_rs_url" && -n "$dpaste_url" ]]; then
-    printf '%s\n' "${paste_rs_url} (${dpaste_url})"
-    return 0
-  fi
-  if [[ -n "$paste_rs_url" ]]; then
-    printf '%s\n' "$paste_rs_url"
-    return 0
-  fi
-  if [[ -n "$dpaste_url" ]]; then
-    printf '%s\n' "$dpaste_url"
+  [[ -n "$pasters_io_url" ]] && urls+=("$pasters_io_url")
+  [[ -n "$paste_rs_url" ]] && urls+=("$paste_rs_url")
+  [[ -n "$dpaste_url" ]] && urls+=("$dpaste_url")
+
+  if [[ "${#urls[@]}" -gt 0 ]]; then
+    output="${urls[0]}"
+    for ((i = 1; i < ${#urls[@]}; i++)); do
+      output+=" (${urls[$i]})"
+    done
+    printf '%s\n' "$output"
     return 0
   fi
 
@@ -251,6 +295,7 @@ ENV_FILE="${NEWSLETTER_ENV:-$PROJECT_ROOT/config/newsletter.env}"
 : "${NEWSLETTER_TMP_DIR:=${NEWSLETTER_RUNTIME_DIR}/tmp}"
 : "${INSTRUCTIONS_FILE:=$PROJECT_ROOT/newsletter_instructions.md}"
 : "${GENERATE_SCRIPT:=$PROJECT_ROOT/scripts/generate_with_codex.sh}"
+: "${PASTERS_IO_ENDPOINT:=https://pasters.io/}"
 : "${PASTE_RS_ENDPOINT:=https://paste.rs}"
 : "${DPASTE_ENDPOINT:=https://dpaste.com/api/v2/}"
 : "${PASTE_UPLOAD_TIMEOUT:=20}"

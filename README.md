@@ -21,7 +21,7 @@ editable prompt file. The easiest way to adapt it is to change
 - Prompt/tone separated into `newsletter_instructions.md`
 - Optional prior-newsletter continuity context
 - Deterministic all-time Best/Worst chatter leaderboard
-- Upload attempts to both `paste.rs` and `dpaste`
+- Upload attempts to `pasters.io`, `paste.rs`, and `dpaste`
 
 ## Repository Layout
 
@@ -146,8 +146,8 @@ Date and input:
 Codex:
 
 - `CODEX_BIN`: Codex CLI path, default `codex`
-- `CODEX_MODEL`: model passed to `codex exec --model`, default `gpt-5.5`
-- `CODEX_MODEL_REASONING_EFFORT`: default `medium`
+- `CODEX_MODEL`: model passed to `codex exec --model`, default `gpt-5.6-terra`
+- `CODEX_MODEL_REASONING_EFFORT`: default `high`
 - `CODEX_WORKDIR`: Codex working directory, default project root
 - `CODEX_HOME`: plugin-local Codex home, default `data/codex_home`
 - `CODEX_DANGEROUS_BYPASS`: set `1` to pass `--dangerously-bypass-approvals-and-sandbox`
@@ -178,6 +178,7 @@ Leaderboard:
 
 Upload:
 
+- `PASTERS_IO_ENDPOINT`: default `https://pasters.io/`; empty disables pasters.io
 - `PASTE_RS_ENDPOINT`: default `https://paste.rs`; empty disables paste.rs
 - `DPASTE_ENDPOINT`: default `https://dpaste.com/api/v2/`; empty disables dpaste
 - `PASTE_UPLOAD_TIMEOUT`: default `20`
