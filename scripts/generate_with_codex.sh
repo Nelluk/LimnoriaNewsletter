@@ -574,6 +574,16 @@ def clean_winner_line(line: str) -> str:
     line = line.strip()
     line = re.sub(r"^[-*]\s*", "", line)
 
+    # The model sometimes repeats the section label in the winner line, e.g.
+    # "**Best chatter**: `nick` — reason".  Strip that optional label before
+    # extracting the nick instead of accidentally counting the label itself.
+    line = re.sub(
+        r"^\*{0,2}(?:best|worst)\s+chatter\*{0,2}\s*:\s*",
+        "",
+        line,
+        flags=re.IGNORECASE,
+    )
+
     backtick_match = re.match(r"^`([^`]+)`", line)
     if backtick_match:
         line = backtick_match.group(1)
@@ -626,6 +636,10 @@ def parse_best_worst(text: str, source: str):
                 break
             if in_section and stripped:
                 nick = normalize_nick(stripped)
+                if nick in KNOWN_SECTION_HEADINGS:
+                    raise ValueError(
+                        f"Refusing section heading as {section_name} winner in {source}"
+                    )
                 if nick:
                     return nick
                 raise ValueError(f"Could not normalize {section_name} winner in {source}")
