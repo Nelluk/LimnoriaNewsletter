@@ -56,6 +56,7 @@ fi
 
 : "${CODEX_BIN:=codex}"
 : "${CODEX_WORKDIR:=$PROJECT_ROOT}"
+: "${NEWSLETTER_CHANNEL:=##debate2016}"
 : "${PASTERS_IO_ENDPOINT:=https://pasters.io/}"
 : "${PASTE_RS_ENDPOINT:=${PASTE_ENDPOINT:-https://paste.rs}}"
 : "${DPASTE_ENDPOINT:=https://dpaste.com/api/v2/}"
@@ -74,6 +75,19 @@ fi
 : "${NEWSLETTER_HISTORY_MAX_TOTAL_CHARS:=10000}"
 : "${NEWSLETTER_LEADERBOARD_FILE:=${STATE_DIR}/leaderboard.json}"
 : "${NEWSLETTER_LEADERBOARD_LIMIT:=10}"
+: "${NEWSLETTER_OUTPUT_SCHEMA_FILE:=$PROJECT_ROOT/config/newsletter-output.schema.json}"
+: "${NEWSLETTER_OUTPUT_PROCESSOR:=$PROJECT_ROOT/scripts/process_newsletter_output.py}"
+: "${NEWSLETTER_AWARD_EXCLUDED_NICKS:=ne2,HenryClay}"
+export NEWSLETTER_AWARD_EXCLUDED_NICKS
+
+[[ -f "$NEWSLETTER_OUTPUT_SCHEMA_FILE" ]] || {
+  echo "Missing output schema: $NEWSLETTER_OUTPUT_SCHEMA_FILE" >&2
+  exit 1
+}
+[[ -f "$NEWSLETTER_OUTPUT_PROCESSOR" ]] || {
+  echo "Missing output processor: $NEWSLETTER_OUTPUT_PROCESSOR" >&2
+  exit 1
+}
 
 if [[ -z "${CODEX_DANGEROUS_BYPASS+x}" ]]; then
   if [[ "$ENV_FILE_LOADED" -eq 1 ]]; then
@@ -468,324 +482,6 @@ print(f"alias_debug: env_present=1 count={len(alias_map)}")
 PY
 }
 
-render_alias_footer_instruction() {
-  python3 - <<'PY'
-import json
-import os
-
-raw = os.environ.get("NEWSLETTER_NICK_ALIASES_JSON", "").strip()
-if not raw:
-    print("Do not add a nick alias footer if no aliases were provided.")
-    raise SystemExit(0)
-
-try:
-    alias_map = json.loads(raw)
-except Exception:
-    print("Do not add a nick alias footer if alias data is invalid.")
-    raise SystemExit(0)
-
-if not isinstance(alias_map, dict) or not alias_map:
-    print("Do not add a nick alias footer if no aliases were provided.")
-    raise SystemExit(0)
-
-pairs = []
-for alias, primary in sorted(alias_map.items()):
-    alias = str(alias or "").strip()
-    primary = str(primary or "").strip()
-    if alias and primary:
-        pairs.append(f"{alias} -> {primary}")
-
-if not pairs:
-    print("Do not add a nick alias footer if no aliases were provided.")
-    raise SystemExit(0)
-
-print(
-    "After the closing line, append one final plain line exactly in this format: "
-    f"`Nick aliases used: {', '.join(pairs)}`"
-)
-PY
-}
-
-update_leaderboard_artifacts() {
-  local markdown_file="$1"
-  local leaderboard_file="$2"
-  local history_dir="$3"
-  local target_date="$4"
-  local top_n="$5"
-  local dry_run="$6"
-
-  if [[ "$top_n" -eq 0 ]]; then
-    return 0
-  fi
-
-  python3 - "$markdown_file" "$leaderboard_file" "$history_dir" "$target_date" "$top_n" "$dry_run" <<'PY'
-import json
-import os
-import re
-import sys
-from pathlib import Path
-
-markdown_path = Path(sys.argv[1])
-leaderboard_path = Path(sys.argv[2])
-history_dir = Path(sys.argv[3])
-target_date = sys.argv[4]
-top_n = int(sys.argv[5])
-dry_run = sys.argv[6] == "1"
-
-
-def load_alias_map():
-    raw = os.environ.get("NEWSLETTER_NICK_ALIASES_JSON", "").strip()
-    if not raw:
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except Exception:
-        return {}
-    if not isinstance(parsed, dict):
-        return {}
-    alias_map = {}
-    for alias, primary in parsed.items():
-        alias = str(alias or "").strip().lower()
-        primary = str(primary or "").strip().lower()
-        if alias and primary:
-            alias_map[alias] = primary
-    return alias_map
-
-
-ALIAS_MAP = load_alias_map()
-CURRENT_SCHEMA_VERSION = 2
-KNOWN_SECTION_HEADINGS = {
-    "what happened",
-    "best arguments",
-    "quotes",
-    "quotes (guess the fake)",
-    "notable grabs and rq's",
-    "stupidest bot interaction",
-    "best chatter",
-    "worst chatter",
-    "honorable mentions",
-    "best/worst awards",
-    "closing",
-    "all-time leaderboard",
-}
-
-
-def clean_winner_line(line: str) -> str:
-    line = line.strip()
-    line = re.sub(r"^[-*]\s*", "", line)
-
-    # The model sometimes repeats the section label in the winner line, e.g.
-    # "**Best chatter**: `nick` — reason".  Strip that optional label before
-    # extracting the nick instead of accidentally counting the label itself.
-    line = re.sub(
-        r"^\*{0,2}(?:best|worst)\s+chatter\*{0,2}\s*:\s*",
-        "",
-        line,
-        flags=re.IGNORECASE,
-    )
-
-    backtick_match = re.match(r"^`([^`]+)`", line)
-    if backtick_match:
-        line = backtick_match.group(1)
-    else:
-        bold_match = re.match(r"^\*+\s*([^*]+?)\s*\*+", line)
-        if bold_match:
-            line = bold_match.group(1)
-        else:
-            split_match = re.match(r"^(.+?)(?:\s*[-–:]\s+.*)?$", line)
-            if split_match:
-                line = split_match.group(1)
-
-    return line.strip().strip("*`").strip()
-
-
-def normalize_nick(raw: str) -> str:
-    nick = clean_winner_line(raw)
-    nick = nick.rstrip("_").strip().lower()
-    return ALIAS_MAP.get(nick, nick)
-
-
-def normalize_heading(line: str) -> str:
-    stripped = line.strip()
-    if re.match(r"^#{2,6}\s+", stripped):
-        stripped = re.sub(r"^#{2,6}\s+", "", stripped)
-    elif re.match(r"^\*\*[^*].*[^*]\*\*$", stripped):
-        stripped = stripped[2:-2].strip()
-    return stripped.lower()
-
-
-def is_section_heading(line: str, section_name: str) -> bool:
-    return normalize_heading(line) == section_name.lower()
-
-
-def is_any_heading(line: str) -> bool:
-    return normalize_heading(line) in KNOWN_SECTION_HEADINGS
-
-
-def parse_best_worst(text: str, source: str):
-    lines = text.splitlines()
-
-    def extract(section_name: str) -> str:
-        in_section = False
-        for line in lines:
-            stripped = line.strip()
-            if is_section_heading(line, section_name):
-                in_section = True
-                continue
-            if in_section and is_any_heading(line):
-                break
-            if in_section and stripped:
-                nick = normalize_nick(stripped)
-                if nick in KNOWN_SECTION_HEADINGS:
-                    raise ValueError(
-                        f"Refusing section heading as {section_name} winner in {source}"
-                    )
-                if nick:
-                    return nick
-                raise ValueError(f"Could not normalize {section_name} winner in {source}")
-        raise ValueError(f"Missing {section_name} section in {source}")
-
-    return {
-        "best": extract("Best chatter"),
-        "worst": extract("Worst chatter"),
-    }
-
-
-def scan_history(directory: Path):
-    by_date = {}
-    if not directory.is_dir():
-        return by_date
-    for path in sorted(directory.glob("newsletter-*.md")):
-        match = re.fullmatch(r"newsletter-(\d{4}-\d{2}-\d{2})\.md", path.name)
-        if not match:
-            continue
-        try:
-            by_date[match.group(1)] = parse_best_worst(
-                path.read_text(encoding="utf-8"), str(path)
-            )
-        except Exception as exc:
-            print(f"leaderboard bootstrap warning: {exc}", file=sys.stderr)
-    return by_date
-
-
-def recompute_totals(by_date):
-    totals = {"best": {}, "worst": {}}
-    for winners in by_date.values():
-        for key in ("best", "worst"):
-            nick = winners[key]
-            totals[key][nick] = totals[key].get(nick, 0) + 1
-    return totals
-
-
-def load_state():
-    if leaderboard_path.is_file():
-        try:
-            data = json.loads(leaderboard_path.read_text(encoding="utf-8"))
-            if data.get("schema_version") != CURRENT_SCHEMA_VERSION:
-                raise ValueError("leaderboard schema version mismatch")
-            by_date = data.get("by_date")
-            if isinstance(by_date, dict):
-                normalized = {}
-                for date_key, winners in by_date.items():
-                    if not isinstance(winners, dict):
-                        continue
-                    best = normalize_nick(str(winners.get("best", "")))
-                    worst = normalize_nick(str(winners.get("worst", "")))
-                    if best and worst:
-                        normalized[str(date_key)] = {"best": best, "worst": worst}
-                if normalized:
-                    return {"schema_version": CURRENT_SCHEMA_VERSION, "by_date": normalized}
-        except Exception:
-            pass
-    return {"schema_version": CURRENT_SCHEMA_VERSION, "by_date": scan_history(history_dir)}
-
-
-def format_leaders(bucket):
-    ordered = sorted(bucket.items(), key=lambda item: (-item[1], item[0]))
-    if top_n > 0:
-        ordered = ordered[:top_n]
-    if not ordered:
-        return "none yet."
-    return ", ".join(f"`{nick}` ({count})" for nick, count in ordered)
-
-
-def remove_existing_leaderboard(lines):
-    out = []
-    skipping = False
-    for line in lines:
-        stripped = line.strip().lower()
-        if stripped == "### all-time leaderboard":
-            skipping = True
-            continue
-        if skipping and line.startswith("### "):
-            skipping = False
-        if not skipping:
-            out.append(line)
-    while out and not out[-1].strip():
-        out.pop()
-    return out
-
-
-def inject_leaderboard(text: str, section: str) -> str:
-    lines = text.splitlines()
-    alias_footer = None
-    while lines and not lines[-1].strip():
-        lines.pop()
-    if lines and lines[-1].startswith("Nick aliases used:"):
-        alias_footer = lines.pop()
-        while lines and not lines[-1].strip():
-            lines.pop()
-
-    body_lines = remove_existing_leaderboard(lines)
-    rebuilt = list(body_lines)
-    if rebuilt:
-        rebuilt.append("")
-    rebuilt.extend(section.splitlines())
-    if alias_footer:
-        rebuilt.append("")
-        rebuilt.append(alias_footer)
-    return "\n".join(rebuilt) + "\n"
-
-
-state = load_state()
-current = parse_best_worst(markdown_path.read_text(encoding="utf-8"), str(markdown_path))
-state["by_date"][target_date] = current
-state["totals"] = recompute_totals(state["by_date"])
-
-leaderboard_section = "\n".join(
-    [
-        "### All-time leaderboard",
-        "",
-        f"**Best chatter**: {format_leaders(state['totals']['best'])}",
-        "",
-        f"**Worst chatter**: {format_leaders(state['totals']['worst'])}",
-    ]
-)
-
-updated_markdown = inject_leaderboard(markdown_path.read_text(encoding="utf-8"), leaderboard_section)
-markdown_path.write_text(updated_markdown, encoding="utf-8")
-
-if not dry_run:
-    leaderboard_path.parent.mkdir(parents=True, exist_ok=True)
-    leaderboard_path.write_text(
-        json.dumps(
-            {
-                "schema_version": CURRENT_SCHEMA_VERSION,
-                "by_date": dict(sorted(state["by_date"].items())),
-                "totals": {
-                    "best": dict(sorted(state["totals"]["best"].items())),
-                    "worst": dict(sorted(state["totals"]["worst"].items())),
-                },
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-PY
-}
-
 tmpdir="$(make_tmpdir)"
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -817,11 +513,22 @@ Award-selection guardrails:
 - Repeat a recent award winner only when today's log itself shows a strong, multi-incident case; if it is close, pick someone else.
 
 Requirements:
-- Read the source log file and write the newsletter content.
-- Return ONLY the final newsletter markdown.
-- No code fences.
-- No explanations.
-- $(render_alias_footer_instruction)
+- Read the source log file and write the newsletter in the same deadpan voice and
+  flexible Markdown structure required above. JSON is only the transport wrapper;
+  it must not flatten, sanitize, or template the writing.
+- Return the JSON object required by the supplied output schema.
+- Put the free-form newsletter in the newsletter_markdown field.
+- In newsletter_markdown, replace the entire Best chatter and Worst chatter
+  sections with exactly one literal <!-- CHATTER_AWARDS --> marker at their
+  normal location. Do not include either chatter heading elsewhere.
+- Put each plain winner nick and its one-line, voice-matched writeup in the
+  corresponding structured award object. The reason must not repeat the nick.
+- Best and Worst chatter must be different people who directly spoke in today's log.
+- Any later Best/Worst awards section must contain distinct joke awards; do not
+  recycle either chatter winner's structured reason as another award.
+- Never select any of these excluded nicks: ${NEWSLETTER_AWARD_EXCLUDED_NICKS}.
+- Do not write an all-time leaderboard or nick-alias footer; the script owns them.
+- Do not include code fences or explanations outside the schema fields.
 PROMPT
 
 codex_cmd=(
@@ -830,6 +537,7 @@ codex_cmd=(
   --cd "$CODEX_WORKDIR"
   --add-dir "$(dirname "$LOG_FILE")"
   --config "model_reasoning_effort=\"${CODEX_MODEL_REASONING_EFFORT}\""
+  --output-schema "$NEWSLETTER_OUTPUT_SCHEMA_FILE"
   --output-last-message "$RAW_MESSAGE_FILE"
 )
 
@@ -872,16 +580,21 @@ if [[ ! -s "$RAW_MESSAGE_FILE" ]]; then
   exit 1
 fi
 
-# Strip accidental fenced blocks if model includes them.
-sed '/^```/d' "$RAW_MESSAGE_FILE" > "$OUTPUT_FILE"
-
-update_leaderboard_artifacts \
-  "$OUTPUT_FILE" \
-  "$NEWSLETTER_LEADERBOARD_FILE" \
-  "$(dirname "$OUTPUT_FILE")" \
-  "$DATE" \
-  "$NEWSLETTER_LEADERBOARD_LIMIT" \
-  "$DRY_RUN"
+processor_cmd=(
+  python3 "$NEWSLETTER_OUTPUT_PROCESSOR"
+  --raw-response "$RAW_MESSAGE_FILE"
+  --log-file "$LOG_FILE"
+  --output "$OUTPUT_FILE"
+  --leaderboard-file "$NEWSLETTER_LEADERBOARD_FILE"
+  --history-dir "$(dirname "$OUTPUT_FILE")"
+  --date "$DATE"
+  --channel "$NEWSLETTER_CHANNEL"
+  --top-n "$NEWSLETTER_LEADERBOARD_LIMIT"
+)
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  processor_cmd+=(--dry-run)
+fi
+"${processor_cmd[@]}"
 
 if [[ "$NO_UPLOAD" -eq 1 ]]; then
   exit 0

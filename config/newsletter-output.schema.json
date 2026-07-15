@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Structured IRC newsletter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "newsletter_markdown",
+    "best_chatter",
+    "worst_chatter"
+  ],
+  "properties": {
+    "newsletter_markdown": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Free-form final newsletter Markdown, except that the Best chatter and Worst chatter sections are represented by exactly one <!-- CHATTER_AWARDS --> placeholder. Do not include an all-time leaderboard or nick-alias footer."
+    },
+    "best_chatter": {
+      "$ref": "#/definitions/chatter_award"
+    },
+    "worst_chatter": {
+      "$ref": "#/definitions/chatter_award"
+    }
+  },
+  "definitions": {
+    "chatter_award": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nick",
+        "reason"
+      ],
+      "properties": {
+        "nick": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Plain IRC nickname only, with no Markdown formatting."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "One-line newsletter prose explaining the award, in the required newsletter voice. Do not repeat the section label or nickname."
+        }
+      }
+    }
+  }
+}

@@ -19,6 +19,7 @@ editable prompt file. The easiest way to adapt it is to change
 - Locking to avoid overlapping runs
 - Explicit date handling with configurable timezone
 - Prompt/tone separated into `newsletter_instructions.md`
+- Schema-constrained Codex output with validated award winners
 - Optional prior-newsletter continuity context
 - Deterministic all-time Best/Worst chatter leaderboard
 - Upload attempts to `pasters.io`, `paste.rs`, and `dpaste`
@@ -28,7 +29,9 @@ editable prompt file. The easiest way to adapt it is to change
 - `plugin.py`, `config.py`, `__init__.py`: Limnoria plugin files
 - `scripts/run_newsletter.sh`: idempotent runner and JSON status emitter
 - `scripts/generate_with_codex.sh`: Codex generation and upload worker
+- `scripts/process_newsletter_output.py`: deterministic validation and rendering
 - `newsletter_instructions.md`: channel-specific voice and structure
+- `config/newsletter-output.schema.json`: Codex structured-output contract
 - `config/newsletter.env.example`: environment template
 - `ops/cron.example`: scheduled-run example
 - `data/`: ignored runtime state, output, logs, temp files, and Codex home
@@ -128,6 +131,14 @@ include `date`, `markdown`, `message`, and usually `url`.
 `--no-upload` writes markdown but skips paste hosts. In that mode `url` is
 empty by design.
 
+Codex returns a schema-constrained JSON envelope whose Markdown field remains
+free-form and follows `newsletter_instructions.md`. Best/Worst chatter winners
+and their model-written reasons are separate structured fields. Before anything
+is published, the processor verifies that both winners spoke in the source log,
+applies configured aliases, rejects excluded nicks, and inserts the award
+sections and leaderboard deterministically. Validation failures publish nothing
+and leave leaderboard state unchanged.
+
 ## Configuration Reference
 
 Environment values come from `config/newsletter.env` unless overridden by the
@@ -175,6 +186,18 @@ Leaderboard:
 
 - `NEWSLETTER_LEADERBOARD_FILE`: default `data/state/leaderboard.json`
 - `NEWSLETTER_LEADERBOARD_LIMIT`: rendered entries per bucket, default `10`; set `0` to disable
+- `NEWSLETTER_OUTPUT_SCHEMA_FILE`: default `config/newsletter-output.schema.json`
+- `NEWSLETTER_AWARD_EXCLUDED_NICKS`: comma-separated nicks that cannot win; default `ne2,HenryClay`
+
+`leaderboard.json` stores the authoritative per-date winners. Display totals are
+recomputed from those records on every run. State is never reconstructed by
+parsing old newsletter prose; missing or invalid historical state fails closed.
+
+Run structured-output regression tests with:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 Upload:
 
